@@ -8,6 +8,8 @@ For each forecast horizon (24h, 48h, 72h = Day 1/2/3), this:
   4. Saves the best model (as binary) + metadata to the MongoDB model registry,
      tagged with its horizon, so the dashboard can fetch "the Day 2 model"
      separately from "the Day 1 model".
+  5. Cleans up old model versions, keeping only the most recent few per
+     horizon, so the models collection doesn't grow unboundedly over time.
 
 Run manually for now:
     python -m src.train
@@ -30,7 +32,6 @@ from pymongo.errors import PyMongoError
 
 from src import config, db
 
-# One model per horizon — Day 1, Day 2, Day 3
 HORIZONS_HOURS = [24, 48, 72]
 TRAIN_SPLIT_RATIO = 0.85
 
@@ -42,7 +43,6 @@ FEATURE_COLS = [
 
 
 def load_data(collection) -> pd.DataFrame:
-    """Pull all feature documents for our city, sorted chronologically."""
     cursor = collection.find({"city": config.CITY_NAME}).sort("timestamp", 1)
     df = pd.DataFrame(list(cursor))
     df = df.drop(columns=[c for c in ["nh3", "_id"] if c in df.columns])
@@ -51,9 +51,6 @@ def load_data(collection) -> pd.DataFrame:
 
 
 def build_target_and_split(df: pd.DataFrame, horizon_hours: int):
-    """Shift AQI forward by horizon_hours to create the target for THIS
-    horizon, then split chronologically. Uses a copy so each horizon's
-    target column doesn't interfere with the others."""
     horizon_df = df.copy()
     horizon_df["aqi_target"] = horizon_df["aqi"].shift(-horizon_hours)
     horizon_df = horizon_df.dropna(subset=["aqi_target"]).reset_index(drop=True)
@@ -65,7 +62,6 @@ def build_target_and_split(df: pd.DataFrame, horizon_hours: int):
 
 
 def train_and_evaluate(train_df: pd.DataFrame, test_df: pd.DataFrame):
-    """Train each candidate model, evaluate on the test set, return results."""
     X_train, y_train = train_df[FEATURE_COLS], train_df["aqi_target"]
     X_test, y_test = test_df[FEATURE_COLS], test_df["aqi_target"]
 
@@ -99,8 +95,6 @@ def select_best(results: list) -> dict:
 
 
 def save_model_registry(best: dict, horizon_hours: int, models_collection):
-    """Serialize the model to bytes and store it + metadata in MongoDB,
-    tagged with its horizon so it can be fetched independently later."""
     buffer = io.BytesIO()
     joblib.dump(best["model"], buffer)
     model_bytes = buffer.getvalue()
@@ -118,8 +112,6 @@ def save_model_registry(best: dict, horizon_hours: int, models_collection):
         "is_active": True,
     }
 
-    # Deactivate the previous active model for THIS city + THIS horizon only
-    # (leaves the other horizons' active models untouched).
     models_collection.update_many(
         {"city": config.CITY_NAME, "horizon_hours": horizon_hours, "is_active": True},
         {"$set": {"is_active": False}},
@@ -129,6 +121,27 @@ def save_model_registry(best: dict, horizon_hours: int, models_collection):
     size_kb = len(model_bytes) / 1024
     print(f"  Best: {best['name']} (R2={best['metrics']['r2']:.3f}), "
           f"serialized {size_kb:.1f} KB, saved as active {horizon_hours}h model")
+
+
+def cleanup_old_models(models_collection, keep_n: int = 3):
+    """
+    Retention policy: for each (city, horizon), keep only the most recent
+    `keep_n` model versions (by trained_at) and delete the rest. This
+    prevents the models collection from growing unboundedly, since every
+    training run adds a new binary (~500KB) per horizon and nothing
+    would otherwise remove the old, inactive ones.
+    """
+    for horizon_hours in HORIZONS_HOURS:
+        docs = list(
+            models_collection.find(
+                {"city": config.CITY_NAME, "horizon_hours": horizon_hours},
+                {"_id": 1},
+            ).sort("trained_at", -1)
+        )
+        ids_to_delete = [d["_id"] for d in docs[keep_n:]]
+        if ids_to_delete:
+            result = models_collection.delete_many({"_id": {"$in": ids_to_delete}})
+            print(f"  Cleanup: removed {result.deleted_count} old model(s) for {horizon_hours}h horizon")
 
 
 def run():
@@ -155,6 +168,9 @@ def run():
             best = select_best(results)
             save_model_registry(best, horizon_hours, models_collection)
             print()
+
+        print("Running cleanup...")
+        cleanup_old_models(models_collection, keep_n=3)
 
         print("Multi-horizon training complete.")
 
