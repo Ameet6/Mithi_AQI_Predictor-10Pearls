@@ -55,3 +55,19 @@ def fetch_historical_air_quality(lat: float, lon: float, start_date: str, end_da
     resp = requests.get(AIR_QUALITY_URL, params=params, timeout=15)
     resp.raise_for_status()
     return resp.json()["hourly"]
+def fetch_forecast_weather(lat: float, lon: float, forecast_days: int = 4) -> dict:
+    """
+    Get actual forecasted (not historical) weather for the next few days.
+    Returns hourly arrays, same shape as fetch_historical_weather, but for
+    the FUTURE instead of the past. Used at prediction time so each
+    horizon's model gets real forecasted conditions for its target day,
+    not just today's weather.
+    """
+    params = {
+        "latitude": lat, "longitude": lon,
+        "hourly": WEATHER_FIELDS,
+        "forecast_days": forecast_days,
+    }
+    resp = requests.get(WEATHER_URL, params=params, timeout=15)
+    resp.raise_for_status()
+    return resp.json()["hourly"]

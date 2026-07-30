@@ -14,9 +14,9 @@ OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
 MONGO_URI = os.getenv("MONGO_URI")
 
 # Target city — change these three lines to forecast a different city.
-CITY_NAME = "Hyderabad"
-LAT = 25.3960
-LON = 68.3578
+CITY_NAME = "Mithi"
+LAT = 24.7400
+LON = 69.8000
 
 DB_NAME = "aqi_predictor"
 FEATURES_COLLECTION = "features"

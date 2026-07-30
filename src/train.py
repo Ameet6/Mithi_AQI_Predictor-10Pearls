@@ -25,7 +25,8 @@ import joblib
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
-from sklearn.linear_model import Ridge
+from sklearn.linear_model import LinearRegression, Ridge
+from xgboost import XGBRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from bson.binary import Binary
 from pymongo.errors import PyMongoError
@@ -51,13 +52,60 @@ def load_data(collection) -> pd.DataFrame:
 
 
 def build_target_and_split(df: pd.DataFrame, horizon_hours: int):
-    horizon_df = df.copy()
-    horizon_df["aqi_target"] = horizon_df["aqi"].shift(-horizon_hours)
-    horizon_df = horizon_df.dropna(subset=["aqi_target"]).reset_index(drop=True)
+    """
+    Build training examples where:
+    - Pollutant features (aqi, pm2_5, pm10, co, no2, so2, o3, aqi_change_rate)
+      come from time T (now) — the only pollution info actually available.
+    - Weather features (temperature, humidity, pressure, wind_speed) come
+      from time T+horizon — using the ACTUAL historical weather as a stand-in
+      for what a forecast would say at real prediction time.
+    - Calendar features (hour, day, month, day_of_week) also come from
+      T+horizon, since these are always exactly knowable in advance.
+    - Target is the AQI at T+horizon.
 
-    split_index = int(len(horizon_df) * TRAIN_SPLIT_RATIO)
-    train_df = horizon_df.iloc[:split_index]
-    test_df = horizon_df.iloc[split_index:]
+    Rows are aligned strictly by timestamp (not just row position), so any
+    gaps in the hourly data (e.g. a missed feature-pipeline run) don't
+    silently misalign "now" with the wrong "future" row.
+    """
+    n = len(df)
+    if n <= horizon_hours:
+        return pd.DataFrame(), pd.DataFrame()
+
+    current = df.iloc[: n - horizon_hours].reset_index(drop=True)
+    future = df.iloc[horizon_hours:].reset_index(drop=True)
+
+    merged = pd.DataFrame({
+        "current_timestamp": current["timestamp"].values,
+        "future_timestamp": future["timestamp"].values,
+        "aqi": current["aqi"].values,
+        "pm2_5": current["pm2_5"].values,
+        "pm10": current["pm10"].values,
+        "co": current["co"].values,
+        "no2": current["no2"].values,
+        "so2": current["so2"].values,
+        "o3": current["o3"].values,
+        "aqi_change_rate": current["aqi_change_rate"].values,
+        "temperature": future["temperature"].values,
+        "humidity": future["humidity"].values,
+        "pressure": future["pressure"].values,
+        "wind_speed": future["wind_speed"].values,
+        "hour": future["hour"].values,
+        "day": future["day"].values,
+        "month": future["month"].values,
+        "day_of_week": future["day_of_week"].values,
+        "aqi_target": future["aqi"].values,
+    })
+
+    # Strict alignment check: only keep rows where future_timestamp is
+    # EXACTLY horizon_hours after current_timestamp. Protects against
+    # silently mismatched rows if there were gaps in the hourly data.
+    expected_future = pd.to_datetime(merged["current_timestamp"]) + pd.Timedelta(hours=horizon_hours)
+    aligned_mask = pd.to_datetime(merged["future_timestamp"]) == expected_future
+    merged = merged[aligned_mask].reset_index(drop=True)
+
+    split_index = int(len(merged) * TRAIN_SPLIT_RATIO)
+    train_df = merged.iloc[:split_index]
+    test_df = merged.iloc[split_index:]
     return train_df, test_df
 
 
@@ -66,11 +114,15 @@ def train_and_evaluate(train_df: pd.DataFrame, test_df: pd.DataFrame):
     X_test, y_test = test_df[FEATURE_COLS], test_df["aqi_target"]
 
     candidates = {
+        "linear_regression": LinearRegression(),
+        "ridge_regression": Ridge(alpha=1.0),
         "random_forest": RandomForestRegressor(
             n_estimators=200, max_depth=12, random_state=42, n_jobs=-1
         ),
-        "ridge_regression": Ridge(alpha=1.0),
         "gradient_boosting": GradientBoostingRegressor(
+            n_estimators=200, max_depth=4, learning_rate=0.05, random_state=42
+        ),
+        "xgboost": XGBRegressor(
             n_estimators=200, max_depth=4, learning_rate=0.05, random_state=42
         ),
     }
@@ -96,9 +148,15 @@ def select_best(results: list) -> dict:
 
 def save_model_registry(best: dict, horizon_hours: int, models_collection):
     buffer = io.BytesIO()
-    joblib.dump(best["model"], buffer)
+    joblib.dump(best["model"], buffer, compress=3)
     model_bytes = buffer.getvalue()
 
+    size_mb = len(model_bytes) / (1024 * 1024)
+    if size_mb > 15:  # MongoDB's hard limit is 16MB per document
+        raise ValueError(
+            f"Model for horizon {horizon_hours}h is {size_mb:.1f} MB even after compression — "
+            f"too large to store in MongoDB. Consider reducing n_estimators/max_depth for this model."
+        )
     trained_at = datetime.now(timezone.utc)
 
     metadata = {
