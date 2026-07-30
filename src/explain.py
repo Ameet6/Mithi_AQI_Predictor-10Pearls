@@ -3,9 +3,12 @@ SHAP explanation helpers.
 Explains WHY a model produced a given prediction, by computing each
 feature's contribution (positive = pushed AQI up, negative = pushed it down).
 
-Uses shap.TreeExplainer, which works directly on tree-based models
-(Random Forest, Gradient Boosting) without needing a background dataset,
-computing exact Shapley values from the tree structure itself.
+Uses shap.Explainer, which auto-selects the correct underlying algorithm
+based on model type: exact tree-structure-based values for tree models
+(Random Forest, Gradient Boosting, XGBoost), or coefficient-based values
+for linear models (Linear Regression, Ridge) — both need a small
+background sample of real data to establish a baseline ("what's a
+typical/average prediction") to measure each feature's deviation from.
 """
 
 import pandas as pd
@@ -31,20 +34,35 @@ FEATURE_LABELS = {
 }
 
 
-def explain_prediction(model, feature_cols: list, feature_row: dict) -> list:
+def get_background_sample(features_collection, city: str, feature_cols: list, n: int = 200) -> pd.DataFrame:
     """
-    Compute SHAP values for a single prediction.
+    Pull a small random sample of historical rows to use as SHAP's
+    background reference — this establishes what a "typical" set of
+    conditions looks like, so contributions can be measured as deviation
+    from that baseline. Works the same way regardless of model type.
+    """
+    pipeline = [
+        {"$match": {"city": city}},
+        {"$sample": {"size": n}},
+    ]
+    docs = list(features_collection.aggregate(pipeline))
+    df = pd.DataFrame(docs)
+    return df[feature_cols]
+
+
+def explain_prediction(model, feature_cols: list, feature_row: dict, background: pd.DataFrame) -> list:
+    """
+    Compute SHAP values for a single prediction, against a background
+    sample for baseline comparison. Works for both tree-based and linear
+    models via SHAP's auto-dispatching Explainer.
 
     Returns a list of dicts, sorted by absolute impact (largest first):
         [{"feature": "pressure", "value": 1004.2, "shap_value": 3.1}, ...]
-
-    shap_value > 0 means that feature pushed the prediction UP (worse AQI).
-    shap_value < 0 means it pushed the prediction DOWN (better AQI).
     """
     X = pd.DataFrame([{col: feature_row.get(col) for col in feature_cols}])
 
-    explainer = shap.TreeExplainer(model)
-    shap_values = explainer.shap_values(X)[0]  # [0] = the single row we passed in
+    explainer = shap.Explainer(model, background)
+    shap_values = explainer(X).values[0]
 
     contributions = [
         {"feature": feature_cols[i], "value": X.iloc[0, i], "shap_value": float(shap_values[i])}
