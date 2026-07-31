@@ -168,10 +168,6 @@ def load_dashboard_data():
     models_collection = db.get_collection(config.MODELS_COLLECTION, client)
     
     client_for_explain = get_db_client()
-    models_collection_explain = db.get_collection(config.MODELS_COLLECTION, client_for_explain)
-    features_collection_explain = db.get_collection(config.FEATURES_COLLECTION, client_for_explain)
-    model_info = load_active_model(selected_horizon, models_collection_explain)
-
     latest = get_latest_features(features_collection)
     forecasts = predict_all_horizons(latest, models_collection)
 
@@ -323,18 +319,14 @@ selected_horizon = horizon_map[day_choice]
 
 client_for_explain = get_db_client()
 models_collection_explain = db.get_collection(config.MODELS_COLLECTION, client_for_explain)
+features_collection_explain = db.get_collection(config.FEATURES_COLLECTION, client_for_explain)
 model_info = load_active_model(selected_horizon, models_collection_explain)
-
-if model_info is not None:
-    from src.explain import FEATURE_LABELS, get_background_sample
-    background = get_background_sample(features_collection, config.CITY_NAME, model_info["feature_cols"])
-    contributions = explain_prediction(model_info["model"], model_info["feature_cols"], latest, background)
-    top_contributions = contributions[:6]
 
 if model_info is not None:
     from src.explain import FEATURE_LABELS, get_background_sample
     background = get_background_sample(features_collection_explain, config.CITY_NAME, model_info["feature_cols"])
     contributions = explain_prediction(model_info["model"], model_info["feature_cols"], latest, background)
+    top_contributions = contributions[:6]
 
     exp_fig = go.Figure()
     labels = [f"{FEATURE_LABELS.get(c['feature'], c['feature'])}  ·  {c['value']}" for c in top_contributions][::-1]

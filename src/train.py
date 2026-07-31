@@ -218,6 +218,11 @@ def run():
             train_df, test_df = build_target_and_split(df, horizon_hours)
             print(f"  Train: {len(train_df)} rows, Test: {len(test_df)} rows")
 
+            if len(train_df) < 50 or len(test_df) < 10:
+                print(f"  Skipping {horizon_hours}h — not enough data yet "
+                      f"(need at least ~{horizon_hours + 50} hours of history).\n")
+                continue
+
             results = train_and_evaluate(train_df, test_df)
             for r in results:
                 m = r["metrics"]
