@@ -23,7 +23,7 @@ from src.predict import get_latest_features, predict_all_horizons, aqi_category,
 from src.explain import explain_prediction
 from src.alerts import check_alert
 
-st.set_page_config(page_title="Hyderabad Air Quality", page_icon="🌤️", layout="wide")
+st.set_page_config(page_title=f"{config.CITY_NAME} Air Quality", page_icon="🌤️", layout="wide")
 
 # ---------------------------------------------------------------------------
 # DESIGN SYSTEM
@@ -199,7 +199,7 @@ if alert is not None:
 # ---------------------------------------------------------------------------
 col_a, col_b = st.columns([3, 1])
 with col_a:
-    st.markdown('<div class="topbar-title">Hyderabad, Pakistan — Air Quality</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="topbar-title">{config.CITY_NAME}, {config.REGION} — Air Quality</div>', unsafe_allow_html=True)
     st.markdown('<div class="topbar-sub">Live monitoring &amp; 3-day forecast</div>', unsafe_allow_html=True)
 with col_b:
     st.markdown('<div class="live-badge"><span class="live-dot"></span>LIVE</div>', unsafe_allow_html=True)
@@ -350,7 +350,7 @@ if model_info is not None:
         bargap=0.4,
     )
     with st.container(border=True):
-        st.plotly_chart(exp_fig, use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(exp_fig, width="stretch", config={"displayModeBar": False})
         st.markdown(
             '<div class="pm-note">🔴 Red = pushed the forecast higher (worse air quality) &nbsp;·&nbsp; '
             '🟢 Green = pushed the forecast lower (better air quality)</div>',
@@ -382,7 +382,7 @@ fig.update_layout(
     yaxis=dict(title="US AQI", gridcolor="#e3e8ef", showline=False),
     margin=dict(l=10, r=10, t=20, b=10),
 )
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, width="stretch")
 
 # ---------------------------------------------------------------------------
 # MODEL PERFORMANCE

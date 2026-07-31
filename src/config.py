@@ -13,8 +13,9 @@ load_dotenv()
 OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
 MONGO_URI = os.getenv("MONGO_URI")
 
-# Target city — change these three lines to forecast a different city.
+# Target city — change these lines to forecast a different city.
 CITY_NAME = "Mithi"
+REGION = "Sindh, Pakistan"
 LAT = 24.7400
 LON = 69.8000
 

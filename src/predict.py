@@ -34,7 +34,17 @@ def load_active_model(horizon_hours: int, models_collection) -> dict:
     if doc is None:
         return None
 
-    model = joblib.load(io.BytesIO(doc["model_binary"]))
+    if doc["algorithm"] == "xgboost":
+        import tempfile, os
+        from xgboost import XGBRegressor
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
+            tmp.write(doc["model_binary"])
+            tmp_path = tmp.name
+        model = XGBRegressor()
+        model.load_model(tmp_path)
+        os.remove(tmp_path)
+    else:
+        model = joblib.load(io.BytesIO(doc["model_binary"]))
     return {
         "model": model,
         "algorithm": doc["algorithm"],

@@ -147,9 +147,20 @@ def select_best(results: list) -> dict:
 
 
 def save_model_registry(best: dict, horizon_hours: int, models_collection):
-    buffer = io.BytesIO()
-    joblib.dump(best["model"], buffer, compress=3)
-    model_bytes = buffer.getvalue()
+    if best["name"] == "xgboost":
+        # XGBoost recommends its own native format over generic pickling,
+        # for compatibility across library versions.
+        import tempfile, os
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
+            tmp_path = tmp.name
+        best["model"].save_model(tmp_path)
+        with open(tmp_path, "rb") as f:
+            model_bytes = f.read()
+        os.remove(tmp_path)
+    else:
+        buffer = io.BytesIO()
+        joblib.dump(best["model"], buffer, compress=3)
+        model_bytes = buffer.getvalue()
 
     size_mb = len(model_bytes) / (1024 * 1024)
     if size_mb > 15:  # MongoDB's hard limit is 16MB per document
