@@ -19,7 +19,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src import config, db
-from src.predict import get_latest_features, predict_all_horizons, aqi_category, load_active_model
+from src.predict import get_latest_features, predict_all_horizons, aqi_category, load_active_model, get_health_guidance
 from src.explain import explain_prediction
 from src.alerts import check_alert
 
@@ -229,11 +229,13 @@ with col1:
             f'</div>'
         )
 
+    guidance = get_health_guidance(current_label)
     st.markdown(f"""
     <div class="panel">
         <div class="panel-title">Air Quality</div>
         <span class="aqi-badge" style="background:{current_bg}; color:{current_text};">{current_label}</span>
         <div class="aqi-big">{latest['aqi']}</div>
+        <div class="pm-note" style="margin-top:0.6rem; margin-bottom:0.9rem; line-height:1.5;">{guidance}</div>
         <div class="legend-strip">
             <div style="background:#16a34a;"></div><div style="background:#eab308;"></div>
             <div style="background:#f97316;"></div><div style="background:#dc2626;"></div>

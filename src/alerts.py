@@ -5,6 +5,8 @@ thresholds (100 = caution, 150 = warning), and returns the info needed
 to render a banner — or None if air quality is fine across the board.
 """
 
+from src.predict import aqi_category, get_health_guidance
+
 CAUTION_THRESHOLD = 100
 WARNING_THRESHOLD = 150
 
@@ -32,17 +34,13 @@ def check_alert(latest_aqi: float, forecasts: list) -> dict:
 
     if worst_aqi >= WARNING_THRESHOLD:
         tier = "warning"
-        message = (
-            f"Unhealthy air quality expected ({worst_when}, AQI {worst_aqi:.0f}). "
-            "Limit outdoor activity — this affects the general public, not just sensitive groups."
-        )
     elif worst_aqi >= CAUTION_THRESHOLD:
         tier = "caution"
-        message = (
-            f"Elevated AQI expected ({worst_when}, AQI {worst_aqi:.0f}). "
-            "Sensitive groups (children, elderly, respiratory/heart conditions) should limit prolonged outdoor exertion."
-        )
     else:
         return None
+
+    label, _, _ = aqi_category(worst_aqi)
+    guidance = get_health_guidance(label)
+    message = f"{label} conditions expected ({worst_when}, AQI {worst_aqi:.0f}). {guidance}"
 
     return {"tier": tier, "worst_aqi": worst_aqi, "worst_when": worst_when, "message": message}

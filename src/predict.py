@@ -150,3 +150,17 @@ def aqi_category(aqi_value: float) -> tuple:
     if aqi_value <= 300:
         return ("Very Unhealthy", "#9333ea", "#ffffff")
     return ("Hazardous", "#7f1d1d", "#ffffff")
+HEALTH_GUIDANCE = {
+    "Good": "Air quality is satisfactory. Enjoy normal outdoor activities.",
+    "Moderate": "Acceptable air quality. Unusually sensitive individuals should consider limiting prolonged outdoor exertion.",
+    "Unhealthy for Sensitive Groups": "Children, elderly, and those with asthma or heart conditions should limit prolonged outdoor exertion. Consider wearing a mask outdoors.",
+    "Unhealthy": "Everyone should limit prolonged outdoor exertion. Sensitive groups should avoid outdoor activity entirely. Wear an N95 mask if going outside.",
+    "Very Unhealthy": "Avoid outdoor activity. Keep windows closed. Sensitive groups should remain indoors with air filtration if possible.",
+    "Hazardous": "Stay indoors. Avoid all outdoor exertion. Use air purifiers indoors if available. Seek medical attention if experiencing symptoms.",
+    "Unknown": "No guidance available.",
+}
+
+
+def get_health_guidance(label: str) -> str:
+    """Return actionable health guidance text for a given AQI category label."""
+    return HEALTH_GUIDANCE.get(label, HEALTH_GUIDANCE["Unknown"])
