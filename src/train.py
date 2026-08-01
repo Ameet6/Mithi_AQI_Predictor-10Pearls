@@ -221,6 +221,12 @@ def run():
         features_collection = db.get_collection(config.FEATURES_COLLECTION, client)
         models_collection = db.get_collection(config.MODELS_COLLECTION, client)
 
+        # Index so cleanup's sort-by-trained_at doesn't need to load full
+        # documents (including large model binaries) into memory to sort.
+        models_collection.create_index([
+            ("city", 1), ("horizon_hours", 1), ("trained_at", -1)
+        ])
+
         df = load_data(features_collection)
         print(f"Loaded {len(df)} rows\n")
 
