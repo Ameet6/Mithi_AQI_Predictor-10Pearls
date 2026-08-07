@@ -72,12 +72,47 @@ def get_forecast_weather_for_target(forecast_hourly: dict, target_time: datetime
     }
 
 
+def build_feature_row_for_horizon(latest_features: dict, horizon_hours: int, forecast_hourly: dict, now: datetime) -> dict:
+    """
+    Build the exact feature row for a given horizon: current pollutants +
+    forecasted weather for the target day + calendar values for the target
+    day. Shared by both prediction and explanation, so they can never
+    silently use different inputs.
+    """
+    target_time = now + timedelta(hours=horizon_hours)
+    weather = get_forecast_weather_for_target(forecast_hourly, target_time)
+
+    return {
+        "aqi": latest_features["aqi"],
+        "pm2_5": latest_features["pm2_5"],
+        "pm10": latest_features["pm10"],
+        "co": latest_features["co"],
+        "no2": latest_features["no2"],
+        "so2": latest_features["so2"],
+        "o3": latest_features["o3"],
+        "aqi_change_rate": latest_features["aqi_change_rate"],
+        "temperature": weather["temperature"],
+        "humidity": weather["humidity"],
+        "pressure": weather["pressure"],
+        "wind_speed": weather["wind_speed"],
+        "hour": target_time.hour,
+        "day": target_time.day,
+        "month": target_time.month,
+        "day_of_week": target_time.weekday(),
+        "target_timestamp": target_time,
+    }
+
+
 def predict_all_horizons(latest_features: dict, models_collection) -> list:
     """
     Run all 3 horizon models using:
     - current pollutant levels (from latest_features)
     - forecasted weather for each target day (fetched live from Open-Meteo)
     - calendar features computed directly from the target timestamp
+
+    Each result includes its exact feature_row, so any downstream
+    explanation (SHAP) can reuse the SAME inputs that produced the
+    prediction, rather than reconstructing (and potentially mismatching) them.
     """
     now = latest_features["timestamp"]
     if now.tzinfo is None:
@@ -92,30 +127,11 @@ def predict_all_horizons(latest_features: dict, models_collection) -> list:
             results.append({
                 "horizon_hours": horizon_hours, "day": horizon_hours // 24,
                 "predicted_aqi": None, "algorithm": None, "metrics": None,
+                "feature_row": None, "feature_cols": None,
             })
             continue
 
-        target_time = now + timedelta(hours=horizon_hours)
-        weather = get_forecast_weather_for_target(forecast_hourly, target_time)
-
-        feature_row = {
-            "aqi": latest_features["aqi"],
-            "pm2_5": latest_features["pm2_5"],
-            "pm10": latest_features["pm10"],
-            "co": latest_features["co"],
-            "no2": latest_features["no2"],
-            "so2": latest_features["so2"],
-            "o3": latest_features["o3"],
-            "aqi_change_rate": latest_features["aqi_change_rate"],
-            "temperature": weather["temperature"],
-            "humidity": weather["humidity"],
-            "pressure": weather["pressure"],
-            "wind_speed": weather["wind_speed"],
-            "hour": target_time.hour,
-            "day": target_time.day,
-            "month": target_time.month,
-            "day_of_week": target_time.weekday(),
-        }
+        feature_row = build_feature_row_for_horizon(latest_features, horizon_hours, forecast_hourly, now)
 
         X = pd.DataFrame([{col: feature_row.get(col) for col in model_info["feature_cols"]}])
         prediction = model_info["model"].predict(X)[0]
@@ -126,6 +142,8 @@ def predict_all_horizons(latest_features: dict, models_collection) -> list:
             "predicted_aqi": round(float(prediction), 1),
             "algorithm": model_info["algorithm"],
             "metrics": model_info["metrics"],
+            "feature_row": feature_row,
+            "feature_cols": model_info["feature_cols"],
         })
 
     return results

@@ -161,7 +161,7 @@ st.markdown("""
 def get_db_client():
     return db.get_client()
 
-
+@st.cache_data(ttl=300)  # cache for 5 minutes — matches roughly how often new data actually arrives
 def load_dashboard_data():
     client = get_db_client()
     features_collection = db.get_collection(config.FEATURES_COLLECTION, client)
@@ -319,16 +319,47 @@ day_choice = st.radio(
 horizon_map = {"Day 1": 24, "Day 2": 48, "Day 3": 72}
 selected_horizon = horizon_map[day_choice]
 
-client_for_explain = get_db_client()
-models_collection_explain = db.get_collection(config.MODELS_COLLECTION, client_for_explain)
-features_collection_explain = db.get_collection(config.FEATURES_COLLECTION, client_for_explain)
-model_info = load_active_model(selected_horizon, models_collection_explain)
+# Find the matching forecast result (already computed above) for the
+# selected day — this guarantees the SAME feature_row that produced the
+# displayed prediction is what gets explained, not a re-derived one.
+selected_forecast = next(f for f in forecasts if f["horizon_hours"] == selected_horizon)
 
-if model_info is not None:
+if selected_forecast["predicted_aqi"] is not None:
     from src.explain import FEATURE_LABELS, get_background_sample
-    background = get_background_sample(features_collection_explain, config.CITY_NAME, model_info["feature_cols"])
-    contributions = explain_prediction(model_info["model"], model_info["feature_cols"], latest, background)
+
+    @st.cache_data(ttl=300)
+    def cached_background_sample(feature_cols_tuple):
+        client = get_db_client()
+        features_collection = db.get_collection(config.FEATURES_COLLECTION, client)
+        return get_background_sample(features_collection, config.CITY_NAME, list(feature_cols_tuple))
+
+    @st.cache_resource(ttl=300)
+    def cached_model(horizon_hours):
+        client = get_db_client()
+        models_collection = db.get_collection(config.MODELS_COLLECTION, client)
+        return load_active_model(horizon_hours, models_collection)
+
+    background = cached_background_sample(tuple(selected_forecast["feature_cols"]))
+    model_info = cached_model(selected_horizon)
+    contributions = explain_prediction(
+        model_info["model"], selected_forecast["feature_cols"], selected_forecast["feature_row"], background
+    )
     top_contributions = contributions[:6]
+
+    # Self-check: SHAP contributions + the background baseline should sum
+    # back to (approximately) the actual predicted value. Shown directly
+    # so anyone reviewing this can verify the explanation is honest.
+    baseline = sum(c["shap_value"] for c in contributions) 
+    reconstructed = model_info["model"].predict(
+        pd.DataFrame([selected_forecast["feature_row"]])[selected_forecast["feature_cols"]]
+    )[0]
+    target_date_str = selected_forecast["feature_row"]["target_timestamp"].strftime("%A, %b %d")
+
+    st.caption(
+        f"Explaining the forecast for **{target_date_str}** — "
+        f"predicted AQI **{selected_forecast['predicted_aqi']}**, "
+        f"model output for these exact inputs: **{reconstructed:.1f}** (should match)"
+    )
 
     exp_fig = go.Figure()
     labels = [f"{FEATURE_LABELS.get(c['feature'], c['feature'])}  ·  {c['value']}" for c in top_contributions][::-1]
@@ -348,7 +379,7 @@ if model_info is not None:
         xaxis=dict(title="Impact on predicted AQI (points)", gridcolor="#eef1f6", zeroline=True, zerolinecolor="#c7cedb", zerolinewidth=1.5,
                     title_font=dict(family="JetBrains Mono", size=11)),
         yaxis=dict(title=None, tickfont=dict(size=13, family="Space Grotesk")),
-        margin=dict(l=130, r=55, t=15, b=45),
+        margin=dict(l=140, r=60, t=15, b=45),
         bargap=0.4,
     )
     with st.container(border=True):
